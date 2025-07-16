@@ -1,0 +1,2 @@
+timestamp,quat_w,quat_x,quat_y,quat_z,acc_x,acc_y,acc_z,lin_acc_x,lin_acc_y,lin_acc_z,gyro_x,gyro_y,gyro_z,mag_x,mag_y,mag_z,euler_yaw,euler_pitch,euler_roll
+1752555553961,1.0,0.0,0.0,0.0,0.0,0.0,9.81,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,138.0,12.81,-0.36

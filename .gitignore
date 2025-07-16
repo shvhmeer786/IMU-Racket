@@ -129,9 +129,9 @@ dmypy.json
 .pyre/
 
 # Project specific
-# Exclude large data files
-data/
-*.csv
+# Include data files in repository for analysis and examples
+# data/ - COMMENTED OUT to include data
+# *.csv - COMMENTED OUT to include CSV files
 
 # Exclude temporary files
 *.tmp
