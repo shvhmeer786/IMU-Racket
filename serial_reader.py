@@ -5,6 +5,7 @@ import time
 import csv
 import os
 import json
+
 import logging
 import re
 from datetime import datetime, timedelta
@@ -256,8 +257,7 @@ class IMUReader:
                 'acc_x', 'acc_y', 'acc_z',
                 'lin_acc_x', 'lin_acc_y', 'lin_acc_z',
                 'quat_w', 'quat_x', 'quat_y', 'quat_z',
-                'mag_x', 'mag_y', 'mag_z',
-                'temperature'
+                'mag_x', 'mag_y', 'mag_z'
             ])
             
             self.current_csv_start = timestamp
@@ -362,8 +362,73 @@ class IMUReader:
     def _parse_sensor_line(self, line: str) -> Optional[Dict[str, Any]]:
         """Parse sensor data from a line and accumulate complete frames."""
         try:
+            # First try the new compact pipe-delimited format
+            # Format: w,x,y,z|heading,roll,pitch|gx,gy,gz|ax,ay,az|lx,ly,lz
+            if '|' in line and line.count('|') >= 4:
+                parts = line.split('|')
+                if len(parts) >= 5:
+                    try:
+                        # Parse quaternion (w,x,y,z)
+                        quat_parts = parts[0].split(',')
+                        if len(quat_parts) >= 4:
+                            w, x, y, z = [float(v.strip()) for v in quat_parts[:4]]
+                            quat = (w, x, y, z)
+                        else:
+                            quat = (1.0, 0.0, 0.0, 0.0)
+                        
+                        # Parse euler angles (heading,roll,pitch)
+                        euler_parts = parts[1].split(',')
+                        if len(euler_parts) >= 3:
+                            heading, roll, pitch = [float(v.strip()) for v in euler_parts[:3]]
+                            euler = (heading, roll, pitch)
+                        else:
+                            euler = (0.0, 0.0, 0.0)
+                        
+                        # Parse gyroscope (gx,gy,gz)
+                        gyro_parts = parts[2].split(',')
+                        if len(gyro_parts) >= 3:
+                            gx, gy, gz = [float(v.strip()) for v in gyro_parts[:3]]
+                            gyro = (gx, gy, gz)
+                        else:
+                            gyro = (0.0, 0.0, 0.0)
+                        
+                        # Parse acceleration (ax,ay,az)
+                        acc_parts = parts[3].split(',')
+                        if len(acc_parts) >= 3:
+                            ax, ay, az = [float(v.strip()) for v in acc_parts[:3]]
+                            acc = (ax, ay, az)
+                        else:
+                            acc = (0.0, 0.0, 9.81)
+                        
+                        # Parse linear acceleration (lx,ly,lz)
+                        lin_acc_parts = parts[4].split(',')
+                        if len(lin_acc_parts) >= 3:
+                            lx, ly, lz = [float(v.strip()) for v in lin_acc_parts[:3]]
+                            lin_acc = (lx, ly, lz)
+                        else:
+                            lin_acc = (0.0, 0.0, 0.0)
+                        
+                        # Create complete frame
+                        frame = {
+                            'ts': int(time.time() * 1000),  # Timestamp in milliseconds
+                            'quat': quat,
+                            'euler': euler,
+                            'gyro': gyro,
+                            'acc': acc,
+                            'lin_acc': lin_acc,
+                            'mag': (0.0, 0.0, 0.0),        # Dummy magnetometer
+                            'raw_data': line               # Store raw data for error detection
+                        }
+                        
+                        logger.debug(f"Successfully parsed compact frame: quat={quat}, euler={euler}")
+                        return frame
+                        
+                    except (ValueError, IndexError) as e:
+                        logger.debug(f"Failed to parse compact format '{line}': {e}")
+            
+            # Fallback to old labeled format for backward compatibility
             # Parse orientation data
-            if 'Orientation:' in line:
+            elif 'Orientation:' in line:
                 parts = line.split('Orientation:')
                 if len(parts) >= 2:
                     orientation_part = parts[-1].strip()
@@ -395,16 +460,8 @@ class IMUReader:
                         self.current_sensor_data['lin_acc'] = (lax, lay, laz)
                         logger.debug(f"Parsed linear acceleration: lax={lax}, lay={lay}, laz={laz}")
             
-            # Parse temperature data
-            elif 'Temp:' in line:
-                parts = line.split('Temp:')
-                if len(parts) >= 2:
-                    temp_part = parts[-1].strip()
-                    temp = float(temp_part)
-                    self.current_sensor_data['temp'] = temp
-                    logger.debug(f"Parsed temperature: temp={temp}°C")
             
-            # Check if we have enough data to create a frame
+            # Check if we have enough data to create a frame (for old format)
             if 'euler' in self.current_sensor_data:
                 # Create frame with available data
                 frame = {
@@ -414,7 +471,7 @@ class IMUReader:
                     'lin_acc': self.current_sensor_data.get('lin_acc', (0.0, 0.0, 0.0)),
                     'mag': (0.0, 0.0, 0.0),        # Dummy magnetometer
                     'euler': self.current_sensor_data['euler'],
-                    'temp': self.current_sensor_data.get('temp', 0.0)
+                    'raw_data': line
                 }
                 
                 # Clear the buffer after creating frame
@@ -439,15 +496,13 @@ class IMUReader:
             lin_acc_x, lin_acc_y, lin_acc_z = frame['lin_acc']
             quat_w, quat_x, quat_y, quat_z = frame['quat']
             mag_x, mag_y, mag_z = frame['mag']
-            temp = frame['temp']
             
             self.csv_writer.writerow([
                 frame['ts'], heading, roll, pitch,
                 acc_x, acc_y, acc_z,
                 lin_acc_x, lin_acc_y, lin_acc_z,
                 quat_w, quat_x, quat_y, quat_z,
-                mag_x, mag_y, mag_z,
-                temp
+                mag_x, mag_y, mag_z
             ])
             
             # Flush periodically

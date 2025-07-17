@@ -3,51 +3,44 @@ import board
 import busio
 import adafruit_bno055
 
-# ── UART connection to BNO055 ──────────────────────────────────────
-uart = busio.UART(tx=board.TX, rx=board.RX, baudrate=115200)
+print("Starting BNO055 test...")
 
-time.sleep(1)                # let sensor boot
+# Simple UART setup
+uart = busio.UART(tx=board.TX, rx=board.RX, baudrate=115200)
+time.sleep(1)
+
+print("UART created, trying to connect to sensor...")
 
 try:
     sensor = adafruit_bno055.BNO055_UART(uart)
-    print("BNO055 connected. Streaming data…")
+    print("BNO055 connected!")
 except Exception as e:
-    print("Sensor init failed:", e)
-    sensor = None
+    print(f"Failed to connect: {e}")
+    while True:
+        time.sleep(1)
 
-def fmt(vec):
-    """Return 'x.xx, y.yy, z.zz'  or zeros if None."""
-    return "0.00, 0.00, 0.00" if vec is None else f"{vec[0]:.2f}, {vec[1]:.2f}, {vec[2]:.2f}"
+print("Starting data stream...")
 
 while True:
-    if sensor is None:
-        print("Sensor not initialized")
-        time.sleep(0.5)
-        continue
-
-    # ── Orientation (Euler) ────────────────────────────────────────
-    euler = sensor.euler                # (heading, roll, pitch)
-    if euler:
-        heading, roll, pitch = euler
-        print(f"Orientation: {heading:.2f}, {roll:.2f}, {pitch:.2f}")
-    else:
-        print("Orientation: 0.00, 0.00, 0.00")
-
-    # ── Raw accelerometer (includes gravity) ───────────────────────
-    accel = sensor.acceleration         # (ax, ay, az)  m/s²
-    print(f"Accel: {fmt(accel)}")
-
-    # ── Linear acceleration (gravity-compensated) ──────────────────
-    lin_accel = sensor.linear_acceleration
-    print(f"LinAccel: {fmt(lin_accel)}")
-
-    # ── Temperature ─────────────────────────────────────────────────
-    temp = sensor.temperature
-    print(f"Temp: {temp:.2f}" if temp is not None else "Temp: 0.00")
-
-    # add other lines the same way if/when you need them:
-    # gyro  = sensor.gyro
-    # mag   = sensor.magnetic
-    # quat  = sensor.quaternion
-
-    time.sleep(0.01)        # 100 Hz output; reduce if you need faster
+    try:
+        # Simple read - just quaternion
+        quat = sensor.quaternion
+        euler = sensor.euler
+        gyro = sensor.gyro
+        accel = sensor.acceleration
+        lin_accel = sensor.linear_acceleration
+        
+        if quat and euler and gyro and accel and lin_accel:
+            w, x, y, z = quat
+            heading, roll, pitch = euler
+            gx, gy, gz = gyro
+            ax, ay, az = accel
+            lx, ly, lz = lin_accel
+            # Compact format for speed
+            print(f"{w:.2f},{x:.2f},{y:.2f},{z:.2f}|{heading:.0f},{roll:.0f},{pitch:.0f}|{gx:.0f},{gy:.0f},{gz:.0f}|{ax:.0f},{ay:.0f},{az:.0f}|{lx:.1f},{ly:.1f},{lz:.1f}")
+        else:
+            print("0,0,0,0|0,0,0|0,0,0|0,0,0|0,0,0")
+    except Exception as e:
+        print(f"Read error: {e}")
+    
+    time.sleep(0.01)  # Back to 100Hz
