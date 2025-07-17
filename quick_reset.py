@@ -10,7 +10,7 @@ import serial
 import time
 import sys
 
-def reset_arduino(port='/dev/cu.usbmodem1101', baud=9600):
+def reset_arduino(port='/dev/cu.usbmodem1101', baud=115200):
     """Reset Arduino using CircuitPython soft reset commands."""
     print(f"🔄 Resetting Arduino on {port}...")
     

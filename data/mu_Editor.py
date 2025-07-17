@@ -4,7 +4,7 @@ import busio
 import adafruit_bno055
 
 # ── UART connection to BNO055 ──────────────────────────────────────
-uart = busio.UART(tx=board.TX, rx=board.RX, baudrate=9600)
+uart = busio.UART(tx=board.TX, rx=board.RX, baudrate=115200)
 
 time.sleep(1)                # let sensor boot
 
@@ -41,9 +41,13 @@ while True:
     lin_accel = sensor.linear_acceleration
     print(f"LinAccel: {fmt(lin_accel)}")
 
+    # ── Temperature ─────────────────────────────────────────────────
+    temp = sensor.temperature
+    print(f"Temp: {temp:.2f}" if temp is not None else "Temp: 0.00")
+
     # add other lines the same way if/when you need them:
     # gyro  = sensor.gyro
     # mag   = sensor.magnetic
     # quat  = sensor.quaternion
 
-    time.sleep(0.1)        # 10 Hz output; reduce if you need faster
+    time.sleep(0.01)        # 100 Hz output; reduce if you need faster

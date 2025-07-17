@@ -75,7 +75,7 @@ python live_racket_debug.py [OPTIONS]
 
 Options:
   --port TEXT          Serial port for IMU (default: /dev/cu.usbmodem1101)
-  --baud INTEGER       Baud rate (default: 9600)
+  --baud INTEGER       Baud rate (default: 115200)
   --length FLOAT       Racket length in meters (default: 0.7)
   --head-radius FLOAT  Racket head radius in meters (default: 0.15)
   --reset             Reset Arduino before connecting

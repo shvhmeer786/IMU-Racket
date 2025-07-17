@@ -69,6 +69,9 @@ class IMUReader:
         self.control_char_pattern = re.compile(r'[\x00-\x1f\x7f-\x9f]')
         self.ansi_escape_pattern = re.compile(r'\x1b\[[0-9;]*[mGKHF]')
         
+        # Current sensor data buffer
+        self.current_sensor_data = {}
+        
         logger.info(f"IMUReader initialized for port {port} at {baud} baud")
     
     def start(self):
@@ -251,8 +254,10 @@ class IMUReader:
             self.csv_writer.writerow([
                 'timestamp', 'heading', 'roll', 'pitch', 
                 'acc_x', 'acc_y', 'acc_z',
+                'lin_acc_x', 'lin_acc_y', 'lin_acc_z',
                 'quat_w', 'quat_x', 'quat_y', 'quat_z',
-                'mag_x', 'mag_y', 'mag_z'
+                'mag_x', 'mag_y', 'mag_z',
+                'temperature'
             ])
             
             self.current_csv_start = timestamp
@@ -319,8 +324,8 @@ class IMUReader:
             
             logger.debug(f"Cleaned line: '{cleaned_line}'")
             
-            # Try to parse as orientation data
-            frame = self._parse_orientation_line(cleaned_line)
+            # Try to parse sensor data
+            frame = self._parse_sensor_line(cleaned_line)
             if frame:
                 self.successful_frames += 1
                 self.last_frame_time = time.time()
@@ -354,44 +359,72 @@ class IMUReader:
         
         return cleaned
     
-    def _parse_orientation_line(self, line: str) -> Optional[Dict[str, Any]]:
-        """Parse orientation data from a line."""
-        # Look for orientation data pattern
-        if 'Orientation:' in line:
-            try:
-                # Extract the part after "Orientation:"
+    def _parse_sensor_line(self, line: str) -> Optional[Dict[str, Any]]:
+        """Parse sensor data from a line and accumulate complete frames."""
+        try:
+            # Parse orientation data
+            if 'Orientation:' in line:
                 parts = line.split('Orientation:')
                 if len(parts) >= 2:
                     orientation_part = parts[-1].strip()
-                    
-                    # Split by comma and parse floats
                     values = [float(x.strip()) for x in orientation_part.split(',')]
-                    
                     if len(values) >= 3:
                         heading, roll, pitch = values[0], values[1], values[2]
-                        
+                        self.current_sensor_data['euler'] = (heading, roll, pitch)
                         logger.debug(f"Parsed orientation: heading={heading}, roll={roll}, pitch={pitch}")
-                        
-                        # Create frame
-                        frame = {
-                            'ts': int(time.time() * 1000),  # Timestamp in milliseconds
-                            'quat': (1.0, 0.0, 0.0, 0.0),  # Dummy quaternion
-                            'acc': (0.0, 0.0, 9.81),       # Dummy acceleration
-                            'mag': (0.0, 0.0, 0.0),        # Dummy magnetometer
-                            'euler': (heading, roll, pitch)
-                        }
-                        
-                        logger.debug(f"Successfully parsed frame: {frame}")
-                        return frame
-                        
-            except (ValueError, IndexError) as e:
-                logger.debug(f"Failed to parse orientation line '{line}': {e}")
-        
-        # Try to parse other line types for debugging
-        if any(keyword in line for keyword in ['Accel:', 'LinAccel:', 'Gyro:']):
-            logger.debug(f"Skipping non-orientation line: {line}")
-        elif line and not line.isspace():
-            logger.debug(f"Unable to parse line: {line}")
+            
+            # Parse raw acceleration data
+            elif 'Accel:' in line:
+                parts = line.split('Accel:')
+                if len(parts) >= 2:
+                    accel_part = parts[-1].strip()
+                    values = [float(x.strip()) for x in accel_part.split(',')]
+                    if len(values) >= 3:
+                        ax, ay, az = values[0], values[1], values[2]
+                        self.current_sensor_data['acc'] = (ax, ay, az)
+                        logger.debug(f"Parsed acceleration: ax={ax}, ay={ay}, az={az}")
+            
+            # Parse linear acceleration data
+            elif 'LinAccel:' in line:
+                parts = line.split('LinAccel:')
+                if len(parts) >= 2:
+                    lin_accel_part = parts[-1].strip()
+                    values = [float(x.strip()) for x in lin_accel_part.split(',')]
+                    if len(values) >= 3:
+                        lax, lay, laz = values[0], values[1], values[2]
+                        self.current_sensor_data['lin_acc'] = (lax, lay, laz)
+                        logger.debug(f"Parsed linear acceleration: lax={lax}, lay={lay}, laz={laz}")
+            
+            # Parse temperature data
+            elif 'Temp:' in line:
+                parts = line.split('Temp:')
+                if len(parts) >= 2:
+                    temp_part = parts[-1].strip()
+                    temp = float(temp_part)
+                    self.current_sensor_data['temp'] = temp
+                    logger.debug(f"Parsed temperature: temp={temp}°C")
+            
+            # Check if we have enough data to create a frame
+            if 'euler' in self.current_sensor_data:
+                # Create frame with available data
+                frame = {
+                    'ts': int(time.time() * 1000),  # Timestamp in milliseconds
+                    'quat': (1.0, 0.0, 0.0, 0.0),  # Dummy quaternion
+                    'acc': self.current_sensor_data.get('acc', (0.0, 0.0, 9.81)),
+                    'lin_acc': self.current_sensor_data.get('lin_acc', (0.0, 0.0, 0.0)),
+                    'mag': (0.0, 0.0, 0.0),        # Dummy magnetometer
+                    'euler': self.current_sensor_data['euler'],
+                    'temp': self.current_sensor_data.get('temp', 0.0)
+                }
+                
+                # Clear the buffer after creating frame
+                self.current_sensor_data.clear()
+                
+                logger.debug(f"Successfully parsed complete frame: {frame}")
+                return frame
+                
+        except (ValueError, IndexError) as e:
+            logger.debug(f"Failed to parse sensor line '{line}': {e}")
         
         return None
     
@@ -403,14 +436,18 @@ class IMUReader:
         try:
             heading, roll, pitch = frame['euler']
             acc_x, acc_y, acc_z = frame['acc']
+            lin_acc_x, lin_acc_y, lin_acc_z = frame['lin_acc']
             quat_w, quat_x, quat_y, quat_z = frame['quat']
             mag_x, mag_y, mag_z = frame['mag']
+            temp = frame['temp']
             
             self.csv_writer.writerow([
                 frame['ts'], heading, roll, pitch,
                 acc_x, acc_y, acc_z,
+                lin_acc_x, lin_acc_y, lin_acc_z,
                 quat_w, quat_x, quat_y, quat_z,
-                mag_x, mag_y, mag_z
+                mag_x, mag_y, mag_z,
+                temp
             ])
             
             # Flush periodically

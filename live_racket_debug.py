@@ -601,8 +601,8 @@ def main():
     parser.add_argument(
         '--baud',
         type=int,
-        default=9600,  # Changed default to CircuitPython baud rate
-        help='Baud rate (default: 9600 for CircuitPython)'
+        default=115200,  # Changed default to CircuitPython baud rate
+        help='Baud rate (default: 115200 for CircuitPython)'
     )
     
     parser.add_argument(
