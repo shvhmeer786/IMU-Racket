@@ -199,7 +199,7 @@ class BoardErrorRecovery:
                 
         except Exception as e:
             print(f"❌ DEBUG: Hardware reset failed: {e}")
-            return False
+
     
     def attempt_recovery(self, error_type: str) -> bool:
         """
@@ -409,6 +409,10 @@ class RacketScene:
         # Color update tracking
         self.last_color_update = 0
         self.current_color = vp.color.blue
+        
+        # File save message tracking
+        self.last_file_save_message = None
+        self.file_save_message_time = 0
         
         print(f"🔧 DEBUG: Creating RacketScene with length={length}, head_radius={head_radius}")
         
@@ -813,7 +817,7 @@ class DebugRacketVisualizer:
         # Initialize error recovery system
         self.error_recovery = BoardErrorRecovery(port, baud)
         self.last_valid_data_time = time.time()
-        self.no_data_timeout = 10.0  # seconds - increased to reduce false positives
+        self.no_data_timeout = 10.0  # seconds
         self.consecutive_errors = 0
         self.max_consecutive_errors = 50  # Increased to reduce false recovery attempts
         self.error_check_interval = 5.0  # Only check for errors every 5 seconds
@@ -822,6 +826,16 @@ class DebugRacketVisualizer:
         
         print(f"✅ DEBUG: Racket visualizer initialization complete")
         print(f"🔧 DEBUG: Error recovery system initialized")
+
+    def detect_file_save_message(self, raw_data: str) -> str:
+        """Detect if the message indicates a file was saved locally."""
+        if not raw_data:
+            return None
+        
+        raw_lower = raw_data.lower()
+        if "=== csv file saved:" in raw_lower:
+            return raw_data.strip()
+        return None
 
     def euler_to_quaternion(self, yaw: float, pitch: float, roll: float) -> tuple:
         """Convert Euler angles to quaternion with debug output."""
@@ -973,6 +987,11 @@ class DebugRacketVisualizer:
                     speed_color = "RED (fast)"
                 info += f"Color: {speed_color}\n\n"
                 
+                # Show file save message if recent (within 5 seconds)
+                if (self.scene.last_file_save_message and 
+                    time.time() - self.scene.file_save_message_time < 5.0):
+                    info += f"💾 {self.scene.last_file_save_message}\n\n"
+                
                 info += f"STATUS: ✅ VISUALIZATION OK"
                 
                 self.scene.update_info(info)
@@ -1033,12 +1052,23 @@ class DebugRacketVisualizer:
                         if self.frames_received % 100 == 0:
                             print(f"📦 DEBUG: Frame #{self.frames_received} (ts: {frame.get('ts', 'Unknown')})")
                         
+                        # Check for file save messages
+                        raw_data = frame.get('raw_data', '')
+                        is_file_save = frame.get('file_save_message', False)
+                        file_save_message = self.detect_file_save_message(raw_data) if not is_file_save else raw_data
+                        
+                        if file_save_message or is_file_save:
+                            print(f"💾 DEBUG: {file_save_message or raw_data}")
+                            # Store the message to display in the web view
+                            if hasattr(self, 'scene'):
+                                self.scene.last_file_save_message = file_save_message or raw_data
+                                self.scene.file_save_message_time = current_time
+                        
                         # Check for errors in frame data, but only periodically
                         should_check_errors = (current_time - self.last_error_check) > self.error_check_interval
                         
                         if should_check_errors:
                             self.last_error_check = current_time
-                            raw_data = frame.get('raw_data', '')
                             error_type, needs_recovery = self.error_recovery.detect_error(raw_data)
                             
                             if needs_recovery:

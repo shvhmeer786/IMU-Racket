@@ -61,6 +61,7 @@ class IMUReader:
         self.max_resets_per_minute = 2  # Limit resets
         self.last_reset_time = 0
         
+        
         # Data processing
         self.frame_count = 0
         self.successful_frames = 0
@@ -344,6 +345,32 @@ class IMUReader:
                 # Write to CSV
                 if self.csv_writer:
                     self._write_csv_row(frame)
+            else:
+                # Check for file save messages even if not sensor data
+                if "=== CSV FILE SAVED:" in cleaned_line:
+                    # Create a special frame for file save messages
+                    current_time = time.time()
+                    frame = {
+                        'ts': int(current_time * 1000),
+                        'quat': (1.0, 0.0, 0.0, 0.0),
+                        'euler': (0.0, 0.0, 0.0),
+                        'gyro': (0.0, 0.0, 0.0),
+                        'acc': (0.0, 0.0, 0.0),
+                        'lin_acc': (0.0, 0.0, 0.0),
+                        'mag': (0.0, 0.0, 0.0),
+                        'raw_data': cleaned_line,
+                        'file_save_message': True
+                    }
+                    
+                    # Add to queue
+                    try:
+                        self.frame_queue.put_nowait(frame)
+                    except queue.Full:
+                        try:
+                            self.frame_queue.get_nowait()
+                            self.frame_queue.put_nowait(frame)
+                        except queue.Empty:
+                            pass
                     
         except Exception as e:
             logger.debug(f"Error processing line '{line}': {e}")
@@ -362,9 +389,80 @@ class IMUReader:
     def _parse_sensor_line(self, line: str) -> Optional[Dict[str, Any]]:
         """Parse sensor data from a line and accumulate complete frames."""
         try:
-            # First try the new compact pipe-delimited format
+            # First try the new compact pipe-delimited format with timestamp
+            # Format: timestamp|w,x,y,z|heading,roll,pitch|gx,gy,gz|ax,ay,az|lx,ly,lz
+            if '|' in line and line.count('|') >= 5:
+                parts = line.split('|')
+                if len(parts) >= 6:
+                    try:
+                        # Parse timestamp (elapsed seconds, can be float)
+                        timestamp_str = parts[0].strip()
+                        if timestamp_str.endswith('s'):
+                            timestamp_str = timestamp_str[:-1]  # Remove 's' suffix
+                        elapsed_seconds = float(timestamp_str)
+                        
+                        # Parse quaternion (w,x,y,z)
+                        quat_parts = parts[1].split(',')
+                        if len(quat_parts) >= 4:
+                            w, x, y, z = [float(v.strip()) for v in quat_parts[:4]]
+                            quat = (w, x, y, z)
+                        else:
+                            quat = (1.0, 0.0, 0.0, 0.0)
+                        
+                        # Parse euler angles (heading,roll,pitch)
+                        euler_parts = parts[2].split(',')
+                        if len(euler_parts) >= 3:
+                            heading, roll, pitch = [float(v.strip()) for v in euler_parts[:3]]
+                            euler = (heading, roll, pitch)
+                        else:
+                            euler = (0.0, 0.0, 0.0)
+                        
+                        # Parse gyroscope (gx,gy,gz)
+                        gyro_parts = parts[3].split(',')
+                        if len(gyro_parts) >= 3:
+                            gx, gy, gz = [float(v.strip()) for v in gyro_parts[:3]]
+                            gyro = (gx, gy, gz)
+                        else:
+                            gyro = (0.0, 0.0, 0.0)
+                        
+                        # Parse acceleration (ax,ay,az)
+                        acc_parts = parts[4].split(',')
+                        if len(acc_parts) >= 3:
+                            ax, ay, az = [float(v.strip()) for v in acc_parts[:3]]
+                            acc = (ax, ay, az)
+                        else:
+                            acc = (0.0, 0.0, 9.81)
+                        
+                        # Parse linear acceleration (lx,ly,lz)
+                        lin_acc_parts = parts[5].split(',')
+                        if len(lin_acc_parts) >= 3:
+                            lx, ly, lz = [float(v.strip()) for v in lin_acc_parts[:3]]
+                            lin_acc = (lx, ly, lz)
+                        else:
+                            lin_acc = (0.0, 0.0, 0.0)
+                        
+                        # Create complete frame
+                        frame = {
+                            'ts': int(time.time() * 1000),  # Timestamp in milliseconds
+                            'elapsed_seconds': elapsed_seconds,  # Store elapsed seconds from sensor
+                            'quat': quat,
+                            'euler': euler,
+                            'gyro': gyro,
+                            'acc': acc,
+                            'lin_acc': lin_acc,
+                            'mag': (0.0, 0.0, 0.0),        # Dummy magnetometer
+                            'raw_data': line               # Store raw data for error detection
+                        }
+                        
+                        logger.debug(f"Successfully parsed timestamped frame: elapsed={elapsed_seconds}s, quat={quat}, euler={euler}")
+                        return frame
+                        
+                    except (ValueError, IndexError) as e:
+                        logger.debug(f"Failed to parse timestamped format '{line}': {e}")
+            
+            # Fallback to old compact format without timestamp
             # Format: w,x,y,z|heading,roll,pitch|gx,gy,gz|ax,ay,az|lx,ly,lz
-            if '|' in line and line.count('|') >= 4:
+            elif '|' in line and line.count('|') >= 4:
                 parts = line.split('|')
                 if len(parts) >= 5:
                     try:
